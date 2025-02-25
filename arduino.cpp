@@ -1,204 +1,236 @@
-#include <PZEM004Tv30.h>
+// Define the analog pin connected to ZMPT101B sensor
+#define sensorR A0
+#define sensorY A1
+#define sensorB A2
+#define sensorL A3
+#define switch1 31
+#define switch2 32
+#define switch3 33
 
-PZEM004Tv30 pzemR(&Serial1);
-PZEM004Tv30 pzemY(&Serial2);
-PZEM004Tv30 pzemB(&Serial3);
+// Calibration factor (adjust based on actual readings)
+#define CALIBRATION_FACTOR 100.0
+
+#define VREF 5.0                  // Reference voltage (5V for Arduino Mega)
+#define SENSOR_SENSITIVITY 140    // Sensitivity in mV/A (100mV/A for ACS712-20A)
+#define ZERO_CURRENT_VOLTAGE 2500 // 2.5V at 0A (in mV)
+#define NUM_SAMPLES 500           // Number of samples for RMS calculation
 
 void setup()
 {
-    pinMode(13, OUTPUT);
-    pinMode(14, OUTPUT);
-    pinMode(15, OUTPUT);
-    Serial.begin(9600);
-    delay(2000); // Allow sensor to initialize
+    Serial.begin(9600); // Start serial communication
+    pinMode(sensorR, INPUT);
+    pinMode(sensorY, INPUT);
+    pinMode(sensorB, INPUT);
+    pinMode(sensorL, INPUT);
+    pinMode(switch1, OUTPUT);
+    pinMode(switch2, OUTPUT);
+    pinMode(switch3, OUTPUT);
 }
 
-class Phase
+float getRMSCurrent(int sensorPin)
 {
-public:
-    float voltage, current, power, energy, frequency, powerFactor;
-    Phase(float v, float c, float p, float e, float f, float pf) : voltage(v), current(c), power(p), energy(e), frequency(f), powerFactor(pf) {}
-};
+    float sumSquaredCurrent = 0;
 
-void logic(float r, float y, float b, float l, int s1, int s2, int s3)
+    for (int i = 0; i < NUM_SAMPLES; i++)
+    {
+        int adcValue = analogRead(sensorPin);
+        float voltage = (adcValue / 1023.0) * VREF * 1000;                     // Convert ADC to mV
+        float current = (voltage - ZERO_CURRENT_VOLTAGE) / SENSOR_SENSITIVITY; // Convert to Amps
+
+        sumSquaredCurrent += current * current; // Sum of squared values
+        delayMicroseconds(10);                  // Short delay for sampling
+    }
+
+    return sqrt(sumSquaredCurrent / NUM_SAMPLES); // RMS Calculation
+}
+
+void loop()
 {
+    float voltage = 233.0;
+    float current_R = getRMSCurrent(sensorR);
+    Serial.println("---Power before---");
+    float power_R = current_R * voltage;
+    // Serial.print("R phase Current: ");
+    // Serial.print(current_R, 3); // Print with 2 decimal places
+    // Serial.println(" A");
+    Serial.print("R phase Power: ");
+    Serial.print(voltage * current_R, 2); // Print with 2 decimal places
+    Serial.println(" W");
+
+    float current_Y = getRMSCurrent(sensorY);
+    float power_Y = current_Y * voltage;
+    // Serial.print("Y phase Current: ");
+    // Serial.print(current_Y, 3); // Print with 2 decimal places
+    // Serial.println(" A");
+    Serial.print("Y phase Power: ");
+    Serial.print(voltage * current_Y, 2); // Print with 2 decimal places
+    Serial.println(" W");
+
+    float current_B = getRMSCurrent(sensorB);
+    float power_B = current_B * voltage;
+    // Serial.print("B phase Current: ");
+    // Serial.print(current_B, 3); // Print with 2 decimal places
+    // Serial.println(" A");
+    Serial.print("B phase Power: ");
+    Serial.print(voltage * current_B, 2); // Print with 2 decimal places
+    Serial.println(" W");
+
+    float current_L = getRMSCurrent(sensorL);
+    float power_L = current_L * voltage;
+    // Serial.print("L phase Current: ");
+    // Serial.print(current_L, 3); // Print with 2 decimal places
+    // Serial.println(" A");
+    Serial.print("L phase Power: ");
+    Serial.print(voltage * current_L, 2); // Print with 2 decimal places
+    Serial.println(" W");
+
+    int s1 = digitalRead(switch1);
+    int s2 = digitalRead(switch2);
+    int s3 = digitalRead(switch3);
+
+    //// LOGIC ////
     if (s1)
-        r -= l;
+        power_R -= power_L;
     if (s2)
-        y -= l;
+        power_Y -= power_L;
     if (s3)
-        b -= l;
+        power_B -= power_L;
 
-    float diff1 = abs(r - y);
-    float diff2 = abs(y - b);
-    float diff3 = abs(r - b);
+    float diff1 = abs(power_R - power_Y);
+    float diff2 = abs(power_Y - power_B);
+    float diff3 = abs(power_R - power_B);
 
     // All powers are equal
     if (!diff1 & !diff2 & !diff3)
     {
-        digitalWrite(13, 0);
-        digitalWrite(14, 0);
-        digitalWrite(15, 0);
+        digitalWrite(switch1, 0);
+        digitalWrite(switch2, 0);
+        digitalWrite(switch3, 0);
     }
-
+    Serial.println("---Power After---");
     // Difference between power of R phase and Y phase is highest
     if (diff1 > diff2 && diff1 > diff3)
     {
-        if (r < y)
+        if (power_R < power_Y)
         {
-            digitalWrite(13, 1);
-            digitalWrite(14, 0);
-            digitalWrite(15, 0);
+            // Switching
+            digitalWrite(switch1, 1);
+            digitalWrite(switch2, 0);
+            digitalWrite(switch3, 0);
+
+            // Power display
+            Serial.print("R phase Power: ");
+            Serial.print(voltage * (current_R + current_L), 2);
+            Serial.println(" W");
+            Serial.print("Y phase Power: ");
+            Serial.print(voltage * current_Y, 2);
+            Serial.println(" W");
+            Serial.print("B phase Power: ");
+            Serial.print(voltage * current_B, 2);
+            Serial.println(" W");
         }
         else
         {
-            digitalWrite(13, 0);
-            digitalWrite(14, 1);
-            digitalWrite(15, 0);
+            // Switching
+            digitalWrite(switch1, 0);
+            digitalWrite(switch2, 1);
+            digitalWrite(switch3, 0);
+
+            // Power display
+            Serial.print("R phase Power: ");
+            Serial.print(voltage * current_R, 2);
+            Serial.println(" W");
+            Serial.print("Y phase Power: ");
+            Serial.print(voltage * (current_Y + current_L), 2);
+            Serial.println(" W");
+            Serial.print("B phase Power: ");
+            Serial.print(voltage * current_B, 2);
+            Serial.println(" W");
         }
     }
 
     // Difference between power of Y phase and B phase is highest
     if (diff2 > diff1 && diff2 > diff3)
     {
-        if (r < b)
+        if (power_Y < power_B)
         {
-            digitalWrite(13, 0);
-            digitalWrite(14, 1);
-            digitalWrite(15, 0);
+            // Switching
+            digitalWrite(switch1, 0);
+            digitalWrite(switch2, 1);
+            digitalWrite(switch3, 0);
+
+            // Display Power
+            Serial.print("R phase Power: ");
+            Serial.print(voltage * current_R, 2);
+            Serial.println(" W");
+            Serial.print("Y phase Power: ");
+            Serial.print(voltage * (current_Y + current_L), 2);
+            Serial.println(" W");
+            Serial.print("B phase Power: ");
+            Serial.print(voltage * current_B, 2);
+            Serial.println(" W");
         }
         else
         {
-            digitalWrite(13, 0);
-            digitalWrite(14, 0);
-            digitalWrite(15, 1);
+            // Switching
+            digitalWrite(switch1, 0);
+            digitalWrite(switch2, 0);
+            digitalWrite(switch3, 1);
+
+            // Power Display
+            Serial.print("R phase Power: ");
+            Serial.print(voltage * current_R, 2);
+            Serial.println(" W");
+            Serial.print("Y phase Power: ");
+            Serial.print(voltage * current_Y, 2);
+            Serial.println(" W");
+            Serial.print("B phase Power: ");
+            Serial.print(voltage * (current_B + current_L), 2);
+            Serial.println(" W");
         }
     }
 
     // Difference between power of R phase and B phase is highest
     if (diff3 > diff1 && diff3 > diff1)
     {
-        if (r < y)
+        if (power_R < power_B)
         {
-            digitalWrite(13, 1);
-            digitalWrite(14, 0);
-            digitalWrite(15, 0);
+            // Switching
+            digitalWrite(switch1, 1);
+            digitalWrite(switch2, 0);
+            digitalWrite(switch3, 0);
+
+            // Power display
+            Serial.print("R phase Power: ");
+            Serial.print(voltage * (current_R + current_L), 2);
+            Serial.println(" W");
+            Serial.print("Y phase Power: ");
+            Serial.print(voltage * current_Y, 2);
+            Serial.println(" W");
+            Serial.print("B phase Power: ");
+            Serial.print(voltage * current_B, 2);
+            Serial.println(" W");
         }
         else
         {
-            digitalWrite(13, 0);
-            digitalWrite(14, 0);
-            digitalWrite(15, 1);
+            // Switching
+            digitalWrite(switch1, 0);
+            digitalWrite(switch2, 0);
+            digitalWrite(switch3, 1);
+
+            // Power Display
+            Serial.print("R phase Power: ");
+            Serial.print(voltage * current_R, 2);
+            Serial.println(" W");
+            Serial.print("Y phase Power: ");
+            Serial.print(voltage * current_Y, 2);
+            Serial.println(" W");
+            Serial.print("B phase Power: ");
+            Serial.print(voltage * (current_B + current_L), 2);
+            Serial.println(" W");
         }
     }
-}
+    Serial.println("-----------------------------------------");
 
-void loop()
-{
-    // R-phase
-    float voltageR = pzemR.voltage();
-    float currentR = pzemR.current();
-    float powerR = pzemR.power();
-    float energyR = pzemR.energy();
-    float frequencyR = pzemR.frequency();
-    float pfR = pzemR.pf();
-
-    // Y-phase
-    float voltageY = pzemY.voltage();
-    float currentY = pzemY.current();
-    float powerY = pzemY.power();
-    float energyY = pzemY.energy();
-    float frequencyY = pzemY.frequency();
-    float pfY = pzemY.pf();
-
-    // B-phase
-    float voltageB = pzemB.voltage();
-    float currentB = pzemB.current();
-    float powerB = pzemB.power();
-    float energyB = pzemB.energy();
-    float frequencyB = pzemB.frequency();
-    float pfB = pzemB.pf();
-
-    // Switches condition
-    auto s1 = digitalRead(13);
-    auto s2 = digitalRead(14);
-    auto s3 = digitalRead(15);
-
-    // Phase R_Phase(voltageR, currentR, powerR, energyR, frequencyR, pfR);
-    // Phase Y_Phase(voltageY, currentY, powerY, energyY, frequencyY, pfY);
-    // Phase B_Phase(voltageB, currentB, powerB, energyB, frequencyB, pfB);
-
-    logic(R_Phase.power, Y_Phase.power, B_Phase.power, s1, s2, s3);
-    delay(10000);
-}
-
-void loop()
-{
-    float voltage = pzem.voltage();
-    if (isnan(voltage))
-    {
-        Serial.println("Error: No data received from PZEM!");
-    }
-    else
-    {
-        Serial.print("Voltage: ");
-        Serial.println(voltage);
-    }
-
-    float current = pzem.current();
-    if (isnan(current))
-    {
-        Serial.println("Error: No data received from PZEM!");
-    }
-    else
-    {
-        Serial.print("Current: ");
-        Serial.println(current);
-    }
-
-    float power = pzem.power();
-    if (isnan(power))
-    {
-        Serial.println("Error: No data received from PZEM!");
-    }
-    else
-    {
-        Serial.print("Power: ");
-        Serial.println(power);
-    }
-
-    float energy = pzem.energy();
-    if (isnan(energy))
-    {
-        Serial.println("Error: No data received from PZEM!");
-    }
-    else
-    {
-        Serial.print("Energy: ");
-        Serial.println(energy);
-    }
-
-    float frequency = pzem.frequency();
-    if (isnan(frequency))
-    {
-        Serial.println("Error: No data received from PZEM!");
-    }
-    else
-    {
-        Serial.print("Frequency: ");
-        Serial.println(frequency);
-    }
-
-    float pf = pzem.pf();
-    if (isnan(pf))
-    {
-        Serial.println("Error: No data received from PZEM!");
-    }
-    else
-    {
-        Serial.print("Power Factor: ");
-        Serial.println(pf);
-    }
-
-    delay(2000);
+    delay(8000); // Update every second
 }
